@@ -4,13 +4,15 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
+	"github.com/itchyny/gojq"
+	"github.com/spf13/pflag"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/itchyny/gojq"
 	"github.com/zhouhaibing089/k8s-pod-logs/pkg/controller/pod"
 	"github.com/zhouhaibing089/k8s-pod-logs/pkg/storage/s3"
 )
@@ -18,21 +20,27 @@ import (
 var (
 	setupLog = ctrl.Log.WithName("setup")
 
-	namespace string
-	s3CfgPath string
-	logKey    string
+	namespace    string
+	s3CfgPath    string
+	nodeSelector []string
+	logKey       string
+	delete       bool
 )
 
 func init() {
-	flag.StringVar(&namespace, "namespace", "", "The namespace to watch")
-	flag.StringVar(&s3CfgPath, "s3-config-path", "", "Path to s3 configuration file")
-	flag.StringVar(&logKey, "log-key", `.metadata.namespace + "/" + .metadata.name`, "The default query on pod to generate log key")
+	pflag.StringVar(&namespace, "namespace", "", "The namespace to watch")
+	pflag.StringVar(&s3CfgPath, "s3-config-path", "", "Path to s3 configuration file")
+	pflag.StringArrayVar(&nodeSelector, "node-selector", []string{}, "the node selector used to filter pods")
+	pflag.StringVar(&logKey, "log-key", `.metadata.namespace + "/" + .metadata.name`, "The default query on pod to generate log key")
+	pflag.BoolVar(&delete, "delete", false, "whether to delete pods after logs get saved")
 }
 
 func main() {
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
-	flag.Parse()
+
+	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
+	pflag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -73,10 +81,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	nodeSelectorMap := map[string]string{}
+	for _, selector := range nodeSelector {
+		index := strings.Index(selector, "=")
+		if index == -1 {
+			setupLog.Error(err, "invalid node selector %s", selector)
+			os.Exit(1)
+		}
+		nodeSelectorMap[selector[:index]] = selector[index+1:]
+	}
+
 	if err = (&pod.PodReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		K8sClient: k8sclient,
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		K8sClient:    k8sclient,
+		NodeSelector: nodeSelectorMap,
 		LogKeyFunc: func(in map[string]interface{}) (string, error) {
 			iter := code.Run(in)
 			for {
@@ -96,6 +115,7 @@ func main() {
 			return "", fmt.Errorf("no value")
 		},
 		Storage: storage,
+		Delete:  delete,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller")
 		os.Exit(1)
