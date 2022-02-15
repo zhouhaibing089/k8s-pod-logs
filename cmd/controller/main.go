@@ -25,6 +25,8 @@ var (
 	nodeSelector []string
 	logKey       string
 	delete       bool
+
+	leaderElection bool
 )
 
 func init() {
@@ -33,6 +35,7 @@ func init() {
 	pflag.StringArrayVar(&nodeSelector, "node-selector", []string{}, "the node selector used to filter pods")
 	pflag.StringVar(&logKey, "log-key", `.metadata.namespace + "/" + .metadata.name`, "The default query on pod to generate log key")
 	pflag.BoolVar(&delete, "delete", false, "whether to delete pods after logs get saved")
+	pflag.BoolVar(&leaderElection, "leader-election", true, "whether to enable leader election, you may have to unset this when running outside of cluster")
 }
 
 func main() {
@@ -44,8 +47,10 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:    scheme.Scheme,
-		Namespace: namespace,
+		Scheme:           scheme.Scheme,
+		Namespace:        namespace,
+		LeaderElection:   leaderElection,
+		LeaderElectionID: "k8s-pod-logs-controller",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to new manager")
