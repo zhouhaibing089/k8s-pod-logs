@@ -10,6 +10,7 @@ require (
 )
 
 require (
+	github.com/gorilla/mux v1.8.0
 	github.com/itchyny/gojq v0.12.6
 	github.com/minio/minio-go/v7 v7.0.20
 	github.com/spf13/pflag v1.0.5
